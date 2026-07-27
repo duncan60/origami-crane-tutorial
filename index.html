@@ -14,8 +14,9 @@
       </main>
       <aside id="panel">
         <header id="panel-head">
-          <h1>紙飛機</h1>
+          <h1 id="model-name">摺紙教學</h1>
           <p id="subtitle">3D 互動摺紙教學</p>
+          <nav id="model-tabs" aria-label="作品選擇"></nav>
         </header>
         <div id="step-detail">
           <div id="step-counter"></div>
@@ -24,6 +25,10 @@
         </div>
         <nav id="step-list" aria-label="步驟列表"></nav>
         <footer id="legend">
+          <div id="palette-row">
+            <span class="palette-label">紙色</span>
+            <div id="palette" role="group" aria-label="紙張顏色"></div>
+          </div>
           <div class="legend-row"><span class="swatch valley"></span>谷摺（往前摺）</div>
           <div class="legend-row"><span class="swatch mountain"></span>山摺（往後摺）</div>
         </footer>

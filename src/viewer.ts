@@ -116,6 +116,11 @@ export class Viewer {
   private creaseMarks = new RibbonBuffer(MAX_MARK_TRIS)
   private arrowMarks = new RibbonBuffer(MAX_MARK_TRIS)
 
+  private whiteMat!: MeshStandardMaterial
+  private colorMat!: MeshStandardMaterial
+  private edgeMat!: LineBasicMaterial
+  private creaseMat!: LineBasicMaterial
+
   private step = 0
   private t = 1
   private frames: Frame[] = []
@@ -157,36 +162,29 @@ export class Viewer {
 
     // ---- 紙面：起始時有顏色的一面朝下，所以朝上那面是白色紙背 ----
     this.positions = this.buildGeometry()
-    this.scene.add(
-      new Mesh(
-        this.geometry,
-        new MeshStandardMaterial({
-          color: new Color(COLOR_BACK),
-          roughness: 0.9,
-          side: 0,
-          flatShading: true,
-        }),
-      ),
-      new Mesh(
-        this.geometry,
-        new MeshStandardMaterial({
-          color: new Color(COLOR_FRONT),
-          roughness: 0.82,
-          side: 1,
-          flatShading: true,
-        }),
-      ),
-    )
+    this.whiteMat = new MeshStandardMaterial({
+      color: new Color(COLOR_BACK),
+      roughness: 0.9,
+      side: 0,
+      flatShading: true,
+    })
+    this.colorMat = new MeshStandardMaterial({
+      color: new Color(COLOR_FRONT),
+      roughness: 0.82,
+      side: 1,
+      flatShading: true,
+    })
+    this.scene.add(new Mesh(this.geometry, this.whiteMat), new Mesh(this.geometry, this.colorMat))
 
     // ---- 紙張邊緣與已摺出的摺痕 ----
-    this.paperEdges = new LineSegments(
-      new BufferGeometry(),
-      new LineBasicMaterial({ color: COLOR_EDGE }),
-    )
-    this.creaseEdges = new LineSegments(
-      new BufferGeometry(),
-      new LineBasicMaterial({ color: COLOR_CREASE, transparent: true, opacity: 0.5 }),
-    )
+    this.edgeMat = new LineBasicMaterial({ color: COLOR_EDGE })
+    this.creaseMat = new LineBasicMaterial({
+      color: COLOR_CREASE,
+      transparent: true,
+      opacity: 0.5,
+    })
+    this.paperEdges = new LineSegments(new BufferGeometry(), this.edgeMat)
+    this.creaseEdges = new LineSegments(new BufferGeometry(), this.creaseMat)
     this.collectEdges()
     this.scene.add(this.paperEdges, this.creaseEdges)
 
@@ -479,6 +477,20 @@ export class Viewer {
   }
 
   // -------------------------------------------------------------- 生命週期
+
+  /** 換紙色：只換有顏色那一面，紙背維持米白；邊線與摺痕跟著紙色調深/調淡 */
+  setPaperColor(hex: number): void {
+    this.colorMat.color.set(hex)
+    this.edgeMat.color.set(hex).multiplyScalar(0.32)
+    this.creaseMat.color.set(hex).lerp(new Color(0xf5efe4), 0.45)
+  }
+
+  dispose(): void {
+    this.renderer.setAnimationLoop(null)
+    this.controls.dispose()
+    this.renderer.dispose()
+    window.removeEventListener('resize', this.resize)
+  }
 
   private resize = (): void => {
     const w = this.canvas.clientWidth
