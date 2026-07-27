@@ -29,12 +29,10 @@ import {
 } from './fold'
 
 /**
- * 紙張厚度，用來把重疊的層錯開避免 z-fighting。
- *
- * 紙鶴最厚處有 14 層，所以這個值會被放大 14 倍；取太大會讓厚的部位（頸、尾）
- * 浮離身體而露出破面。只要大於深度緩衝的解析度就夠了。
+ * 紙張厚度。實際偏移量是 SHEET × √層序（見 sheetOffsetAt），
+ * 所以第 1 層就分開 SHEET，而第 34 層只到 5.8×SHEET，上層不會浮離身體。
  */
-const SHEET = 0.0022
+const SHEET = 0.0045
 
 const COLOR_FRONT = 0xd2603f
 const COLOR_BACK = 0xf2ebdf

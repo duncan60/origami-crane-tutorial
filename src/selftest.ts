@@ -45,15 +45,16 @@ export function selftest(built: Built, paperArea: number): string {
   }
   check(flatness.every((v) => v < 1e-4), `前 ${built.nSteps - 1} 步摺平（最大偏離 ${Math.max(...flatness).toExponential(1)}）`)
 
-  // 3. 任何一對在投影上重疊的面，局部厚度都必須不同。
-  //    厚度相同就代表偏移量相同，兩個面會在同一個深度互相 z-fighting，
-  //    畫面上呈現斑駁的鋸齒邊界——這正是步驟 7 以後破圖的成因。
+  // 3. 同一層號的兩個面絕不能在投影上重疊。
+  //    厚度偏移是層號的單調函數，所以「重疊 ⇒ 層號不同」就等於
+  //    「重疊 ⇒ 偏移量不同」，遮蔽順序必定正確也不會 z-fighting。
+  //    這是整個渲染正確性的支點。
   const collisions: string[] = []
   built.snapshots.forEach((snap, si) => {
     let n = 0
     for (let i = 0; i < snap.length; i++) {
       for (let j = i + 1; j < snap.length; j++) {
-        if (snap[i].depth !== snap[j].depth) continue
+        if (snap[i].layer !== snap[j].layer) continue
         if (convexOverlapArea(snap[i].poly, snap[j].poly) > 1e-5) n++
       }
     }
@@ -61,12 +62,13 @@ export function selftest(built: Built, paperArea: number): string {
   })
   check(
     collisions.length === 0,
-    `重疊的面厚度皆不同（${collisions.length === 0 ? '無衝突' : collisions.join('、')}）`,
+    `同層號的面互不重疊（${collisions.length === 0 ? '無衝突' : collisions.join('、')}）`,
   )
 
-  // 4. 局部厚度就是該處實際壓著的紙層數，數值應該接近真實紙鶴的層數而非全域層號
-  const maxDepth = Math.max(...built.faces.flatMap((f) => f.signedDepth.map(Math.abs)))
-  check(maxDepth <= 26, `最厚處 ${maxDepth} 層（過大會讓厚的部位浮離而穿面）`)
+  // 4. 最上層離基準面的距離要夠小，否則頸尾會浮離身體而看起來像穿模
+  const maxLayer = Math.max(...built.faces.flatMap((f) => f.signedLayer.map(Math.abs)))
+  const lift = Math.sqrt(maxLayer)
+  check(lift <= 7, `最上層抬升 ${lift.toFixed(1)} 個紙厚（共 ${maxLayer} 層，取平方根壓縮）`)
 
   return `${failed === 0 ? '全部通過' : `${failed} 項未通過`}\n${lines.join('\n')}`
 }

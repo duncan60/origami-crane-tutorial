@@ -124,39 +124,51 @@ const narrowPoint = (side: 'left' | 'right', t0: number, t1: number): FoldOp => 
 })
 
 /**
- * 內翻摺：把尖角沿一條斜線整疊反摺過去。斜線角度 α 會把原本朝下（270°）的
- * 尖角轉到 2α − 270°，所以頸子要朝左上 135° 就取 α = 22.5°，尾巴朝右上 45° 取 α = 157.5°。
+ * 內翻摺：把尖角沿一條斜線整疊反摺過去。
+ *
+ * 摺線角度 α 會把原本朝下（270°）的尖角轉到 2α − 270°，所以想要的方向決定了摺線角度：
+ * α = (方向 + 270) / 2。
+ *
+ * 45° 是紙鶴的自然頸角。尖端的水平距離（0.67）雖然沒超過翅膀的半展幅（0.707），
+ * 但翅膀是菱形，尖端仍會穿出翅膀的斜上緣約 0.2 個單位，所以看得見。
+ * 不要為了讓它更突出而把角度壓平——立起來之後頸子會變得太水平，就不像鶴了。
  */
-// 轉折點放在細尖角接近根部處（根部在 y = 0.414），頸與尾才會明顯伸出翅膀輪廓之外
-const REVERSE_Q = v2(0, 0.38)
+const NECK_DIR = 135 // 朝左上 45°
+const TAIL_DIR = 45 // 朝右上 45°
+const creaseAngleFor = (dir: number): number => (dir + 270) / 2
+
+/** 內翻摺的轉折點，位於細尖角的脊線上（尖角根部在 y = 0.414） */
+const REVERSE_Q = v2(0, 0.36)
 /** 每個細尖角的紙層數：主三角形 + 花瓣摺 2 片 + 收窄 4 片 */
 const POINT_LAYERS = 7
 
 const reverseFold = (
-  deg: number,
+  dir: number,
   layers: FoldOp['layers'],
-  dir: 'up' | 'down',
+  updown: 'up' | 'down',
   t0: number,
   t1: number,
 ): FoldOp => ({
   kind: 'fold',
   a: REVERSE_Q,
-  b: ray(REVERSE_Q, deg),
+  b: ray(REVERSE_Q, creaseAngleFor(dir)),
   move: v2(0, -0.2), // 尖角那一側
   layers,
-  dir,
+  dir: updown,
   crease: 'mountain',
   t0,
   t1,
 })
 
-/** 翅膀的摺線高度：略高於細尖角根部，摺線以上就是翅膀 */
-const WING_HINGE = 0.44
+/** 翅膀的摺線高度：與頸尾伸出的位置齊平，摺線以上就是翅膀 */
+const WING_HINGE = 0.4
 
 /** 頸子反摺後的頂端，用來定位頭部那一摺 */
 const NECK_LEN = REVERSE_Q.y - APEX.y
-const NECK_TIP = ray(REVERSE_Q, 135, NECK_LEN)
-const HEAD_Q = ray(REVERSE_Q, 135, NECK_LEN * 0.72)
+const NECK_TIP = ray(REVERSE_Q, NECK_DIR, NECK_LEN)
+const HEAD_Q = ray(REVERSE_Q, NECK_DIR, NECK_LEN * 0.74)
+/** 鶴嘴的方向：從頸子再往前下方折 */
+const BEAK_DIR = 195
 
 export const craneSteps: StepDef[] = [
   {
@@ -227,8 +239,8 @@ export const craneSteps: StepDef[] = [
     title: '內翻摺：頸子與尾巴',
     desc: '把前面那個細尖角沿斜線往左上反摺成頸子，另一個往右上反摺成尾巴。兩個尖角原本重疊在一起，反摺到不同方向就分開了。',
     ops: [
-      reverseFold(22.5, { top: POINT_LAYERS }, 'up', 0, 0.55),
-      reverseFold(157.5, { bottom: POINT_LAYERS }, 'down', 0.42, 1),
+      reverseFold(NECK_DIR, { top: POINT_LAYERS }, 'up', 0, 0.55),
+      reverseFold(TAIL_DIR, { bottom: POINT_LAYERS }, 'down', 0.42, 1),
     ],
   },
   {
@@ -238,7 +250,8 @@ export const craneSteps: StepDef[] = [
       {
         kind: 'fold',
         a: HEAD_Q,
-        b: ray(HEAD_Q, 162.5),
+        // 把頸子的方向再折到鶴嘴的方向，摺線角度同樣是兩者的平均
+        b: ray(HEAD_Q, (BEAK_DIR + NECK_DIR) / 2),
         move: NECK_TIP,
         layers: { top: POINT_LAYERS },
         dir: 'up',

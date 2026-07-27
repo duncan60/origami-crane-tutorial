@@ -334,7 +334,7 @@ export interface BuiltFace {
    * 局部厚度是「這個位置實際壓在它下面的紙層數」，不是全域層號。用全域層號會讓
    * 層號大的部位（例如紙鶴的頸子）被推離基準面太遠而穿過其他紙面。
    */
-  signedDepth: number[]
+  signedLayer: number[]
 }
 
 export interface BuiltFold {
@@ -380,7 +380,7 @@ interface SimFace {
   flat: Iso
   chain: number[]
   layer: number
-  signedDepth: number[]
+  signedLayer: number[]
   out: number
 }
 
@@ -446,7 +446,7 @@ export function buildModel(paper: Vec2[], steps: StepDef[]): Built {
       flat: ISO_ID,
       chain: [],
       layer: 0,
-      signedDepth: [0],
+      signedLayer: [0],
       out: -1,
     },
   ]
@@ -460,45 +460,23 @@ export function buildModel(paper: Vec2[], steps: StepDef[]): Built {
   }
 
   /**
-   * 記錄每個面此刻的局部厚度，也就是它在自己那一疊紙裡的高度。
+   * 記錄每個面此刻的層序（乘上正反面號誌）。
    *
-   * 依層號由低到高處理，每個面的高度 = 「所有和它重疊、且層號更低的面」之中最大的高度 + 1。
-   * 這是重疊關係上的最長鏈，保證**任何一對重疊的面高度都嚴格不同**——只要兩個重疊的面
-   * 拿到相同高度，偏移量就會一樣而互相 z-fighting，畫面上就是斑駁的鋸齒邊界。
+   * 層序是這個引擎維護的**權威堆疊順序**，任何一對重疊的面層序一定不同
+   * （同層的面保證不重疊）。渲染時把它單調地映射成厚度偏移，遮蔽關係就一定正確，
+   * 也不可能 z-fighting。
    *
-   * 不能改用「數有幾個面蓋住自己的重心」這種取樣法：兩個重疊的面各自用不同的取樣點，
-   * 數出來的結果可能相同。
+   * 曾經試過用「局部厚度」來算偏移量，兩種做法都失敗：
+   *   - 重疊關係上的最長鏈：鏈會在重疊圖上遊走（頸尖的面重疊翅膀、翅膀又重疊別處），
+   *     頸尖算出 19 層而該處實際只有 4 層，整條頸子浮離身體。
+   *   - 數有幾個面蓋住自己的重心：兩個重疊的面用不同取樣點，會產生大量順序反轉。
+   * 正確的局部層序是已知的困難問題，原型不需要——單調壓縮層序就足夠了。
    *
    * 每一摺結束後都記一次，播放動畫時偏移量才能跟著造成它的那一摺變化，
    * 而不是整個步驟一起內插——否則子摺提早落下時，紙層會互相穿刺。
    */
-  function recordDepths(): void {
-    const flats = faces.map((f) => f.poly.map((p) => applyIso(f.flat, p)))
-    const boxes = flats.map((poly) => ({
-      x0: Math.min(...poly.map((p) => p.x)),
-      x1: Math.max(...poly.map((p) => p.x)),
-      y0: Math.min(...poly.map((p) => p.y)),
-      y1: Math.max(...poly.map((p) => p.y)),
-    }))
-    const order = faces.map((_, i) => i).sort((a, b) => faces[a].layer - faces[b].layer)
-    const height = new Array<number>(faces.length).fill(0)
-
-    for (let oi = 0; oi < order.length; oi++) {
-      const i = order[oi]
-      let best = -1
-      for (let oj = 0; oj < oi; oj++) {
-        const j = order[oj]
-        if (faces[j].layer >= faces[i].layer) continue
-        // 只要不可能提高目前的最大值，就不必做昂貴的重疊判斷
-        if (height[j] <= best) continue
-        const a = boxes[i]
-        const b = boxes[j]
-        if (a.x1 < b.x0 || b.x1 < a.x0 || a.y1 < b.y0 || b.y1 < a.y0) continue
-        if (convexOverlapArea(flats[i], flats[j]) > 1e-7) best = height[j]
-      }
-      height[i] = best + 1
-    }
-    faces.forEach((f, i) => f.signedDepth.push(height[i] * Math.sign(isoDet(f.flat))))
+  function recordLayers(): void {
+    for (const f of faces) f.signedLayer.push(f.layer * Math.sign(isoDet(f.flat)))
   }
 
   /** 某一摺在目前狀態下的 3D 旋轉矩陣（先前各摺皆已完成） */
@@ -544,7 +522,7 @@ export function buildModel(paper: Vec2[], steps: StepDef[]): Built {
           flat: face.flat,
           chain: [...face.chain],
           layer: face.layer,
-          signedDepth: [...face.signedDepth],
+          signedLayer: [...face.signedLayer],
           out: -1,
         }
         const flatCentroid = applyIso(face.flat, centroid(part.poly))
@@ -653,7 +631,7 @@ export function buildModel(paper: Vec2[], steps: StepDef[]): Built {
     const oldLayers = new Map(group.map((f) => [f, f.layer] as const))
     for (const f of group) f.layer = remap.get(oldLayers.get(f)!)!
     renumber(faces)
-    recordDepths()
+    recordLayers()
   }
 
   const applyUnfoldOp = (op: UnfoldOp, step: number): void => {
@@ -694,7 +672,7 @@ export function buildModel(paper: Vec2[], steps: StepDef[]): Built {
       if (before !== undefined) f.layer = before
     }
     renumber(faces)
-    recordDepths()
+    recordLayers()
   }
 
   const applyGlobalOp = (op: SpinOp | TurnOp | PoseOp, step: number): void => {
@@ -746,7 +724,7 @@ export function buildModel(paper: Vec2[], steps: StepDef[]): Built {
       if (op.kind === 'turn') f.layer = -f.layer
     }
     renumber(faces)
-    recordDepths()
+    recordLayers()
   }
 
   const snapshots: { layer: number; depth: number; poly: Vec2[] }[][] = []
@@ -760,7 +738,7 @@ export function buildModel(paper: Vec2[], steps: StepDef[]): Built {
       faces
         .map((f) => ({
           layer: f.layer,
-          depth: Math.abs(f.signedDepth[f.signedDepth.length - 1]),
+          depth: Math.abs(f.signedLayer[f.signedLayer.length - 1]),
           poly: f.poly.map((p) => applyIso(f.flat, p)),
         }))
         .sort((a, b) => a.layer - b.layer),
@@ -779,7 +757,7 @@ export function buildModel(paper: Vec2[], steps: StepDef[]): Built {
       poly: f.poly,
       tags: f.tags,
       chain: f.chain,
-      signedDepth: f.signedDepth,
+      signedLayer: f.signedLayer,
     })),
     folds,
     steps: steps.map((s) => ({ title: s.title, desc: s.desc })),
@@ -833,18 +811,21 @@ export function matricesAt(built: Built, step: number, t: number): Matrix4[] {
 }
 
 /**
- * 紙張厚度造成的偏移量（帶號，沿面自身法線方向）。
+ * 紙張厚度造成的偏移量（帶號，單位為「紙厚」，沿面自身法線方向）。
  *
- * 每一摺造成的厚度變化，各自跟著那一摺的進度變化，而不是整個步驟一起內插。
+ * 用層序的**平方根**而不是層序本身。平方根是單調的，所以任何一對重疊的面
+ * （層序必不同）遮蔽順序一定正確、也不可能 z-fighting；同時它會壓縮上層的距離，
+ * 紙鶴有 30 幾層時最上層才不會浮離身體。相鄰低層仍分得開，看得出疊紙的厚度。
+ *
+ * 每一摺造成的層序變化，各自跟著那一摺的進度變化，而不是整個步驟一起內插。
  * 複合摺的子摺有各自的時間區間，若用步驟進度統一內插，先落下的紙層偏移量還沒到位，
  * 就會穿進下方的紙裡。
  */
 export function sheetOffsetAt(built: Built, faceIdx: number, step: number, t: number): number {
-  const hist = built.faces[faceIdx].signedDepth
+  const hist = built.faces[faceIdx].signedLayer
   const ids = built.folds.filter((f) => f.step === step).map((f) => f.id)
-  if (ids.length === 0) return hist[Math.min(hist.length - 1, 0)]
-  let v = hist[ids[0]]
+  let v = ids.length === 0 ? hist[0] : hist[ids[0]]
   for (const id of ids) v += (hist[id + 1] - hist[id]) * progressOf(built.folds[id], t)
-  return v
+  return Math.sign(v) * Math.sqrt(Math.abs(v))
 }
 
