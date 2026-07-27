@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>紙鶴摺紙教學 · 3D 互動</title>
+    <meta name="description" content="以 3D 摺疊動畫逐步教你摺出紙鶴，可自由旋轉視角、拖曳觀察每一摺的過程。" />
+  </head>
+  <body>
+    <div id="app">
+      <main id="stage">
+        <canvas id="canvas"></canvas>
+        <div id="hint">拖曳畫面可旋轉視角 · 滾輪縮放</div>
+      </main>
+      <aside id="panel">
+        <header id="panel-head">
+          <h1>紙鶴</h1>
+          <p id="subtitle">3D 互動摺紙教學</p>
+        </header>
+        <div id="step-detail">
+          <div id="step-counter"></div>
+          <h2 id="step-title"></h2>
+          <p id="step-desc"></p>
+        </div>
+        <nav id="step-list" aria-label="步驟列表"></nav>
+        <footer id="legend">
+          <div class="legend-row"><span class="swatch valley"></span>谷摺（往前摺）</div>
+          <div class="legend-row"><span class="swatch mountain"></span>山摺（往後摺）</div>
+        </footer>
+      </aside>
+      <div id="controls">
+        <button id="btn-prev" title="上一步">◀ 上一步</button>
+        <button id="btn-replay" title="重播此步驟">↻ 重播</button>
+        <button id="btn-play" title="播放／暫停">▶ 播放</button>
+        <input id="scrub" type="range" min="0" max="1000" value="1000" step="1" aria-label="摺疊進度" />
+        <span id="scrub-label">100%</span>
+        <button id="btn-next" title="下一步">下一步 ▶</button>
+      </div>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
