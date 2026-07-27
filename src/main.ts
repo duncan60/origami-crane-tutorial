@@ -1,6 +1,7 @@
 import './style.css'
 import { buildModel, embed, matricesAt, v2, type Built } from './fold'
 import { craneSteps } from './crane'
+import { selftest } from './selftest'
 import { Viewer } from './viewer'
 
 // 這支程式在 module 層建立 Viewer 並綁定事件，熱更新會疊出第二份實例，
@@ -144,6 +145,9 @@ goTo(0)
     .join('\n')
 ;(window as unknown as Record<string, unknown>).__built = built
 ;(window as unknown as Record<string, unknown>).__viewer = viewer
+
+// 一次跑完所有幾何不變量檢查
+;(window as unknown as Record<string, unknown>).__selftest = (): string => selftest(built, 4)
 
 // 檢查某個時刻的 3D 幾何是否確實攤平（摺平狀態下 y 應該全為 0）
 ;(window as unknown as Record<string, unknown>).__probe = (s: number, tt: number): string => {

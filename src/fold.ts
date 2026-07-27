@@ -294,8 +294,13 @@ export interface BuiltFace {
   tags: number[]
   /** 依序作用在這個面上的摺 id */
   chain: number[]
-  /** 每個步驟結束時的「層序 × 正反面號誌」；索引 0 為初始狀態 */
-  signedLayer: number[]
+  /**
+   * 每一摺之後的「局部厚度 × 正反面號誌」，索引 k 表示第 k−1 摺結束後的值，索引 0 為初始狀態。
+   *
+   * 局部厚度是「這個位置實際壓在它下面的紙層數」，不是全域層號。用全域層號會讓
+   * 層號大的部位（例如紙鶴的頸子）被推離基準面太遠而穿過其他紙面。
+   */
+  signedDepth: number[]
 }
 
 export interface BuiltFold {
@@ -341,7 +346,7 @@ interface SimFace {
   flat: Iso
   chain: number[]
   layer: number
-  signedLayer: number[]
+  signedDepth: number[]
   out: number
 }
 
@@ -407,7 +412,7 @@ export function buildModel(paper: Vec2[], steps: StepDef[]): Built {
       flat: ISO_ID,
       chain: [],
       layer: 0,
-      signedLayer: [0],
+      signedDepth: [0],
       out: -1,
     },
   ]
@@ -418,6 +423,33 @@ export function buildModel(paper: Vec2[], steps: StepDef[]): Built {
 
   function findRep(fold: BuiltFold): SimFace {
     return faces.find((f) => matchesPrefix(f, fold.prefix, fold.id))!
+  }
+
+  /**
+   * 記錄每個面此刻的局部厚度：以自己的重心為取樣點，數有幾個層號較低的面蓋著同一個位置。
+   * 每一摺結束後都記一次，這樣播放動畫時偏移量可以跟著造成它的那一摺一起變化，
+   * 而不是整個步驟一起線性內插——否則子摺提早落下時，紙層會互相穿刺。
+   */
+  function recordDepths(): void {
+    const flats = faces.map((f) => f.poly.map((p) => applyIso(f.flat, p)))
+    const cents = flats.map(centroid)
+    const boxes = flats.map((poly) => ({
+      x0: Math.min(...poly.map((p) => p.x)),
+      x1: Math.max(...poly.map((p) => p.x)),
+      y0: Math.min(...poly.map((p) => p.y)),
+      y1: Math.max(...poly.map((p) => p.y)),
+    }))
+    faces.forEach((f, i) => {
+      const c = cents[i]
+      let depth = 0
+      for (let j = 0; j < faces.length; j++) {
+        if (j === i || faces[j].layer >= f.layer) continue
+        const b = boxes[j]
+        if (c.x < b.x0 || c.x > b.x1 || c.y < b.y0 || c.y > b.y1) continue
+        if (pointInPoly(flats[j], c)) depth++
+      }
+      f.signedDepth.push(depth * Math.sign(isoDet(f.flat)))
+    })
   }
 
   /** 某一摺在目前狀態下的 3D 旋轉矩陣（先前各摺皆已完成） */
@@ -463,7 +495,7 @@ export function buildModel(paper: Vec2[], steps: StepDef[]): Built {
           flat: face.flat,
           chain: [...face.chain],
           layer: face.layer,
-          signedLayer: [...face.signedLayer],
+          signedDepth: [...face.signedDepth],
           out: -1,
         }
         const flatCentroid = applyIso(face.flat, centroid(part.poly))
@@ -572,6 +604,7 @@ export function buildModel(paper: Vec2[], steps: StepDef[]): Built {
     const oldLayers = new Map(group.map((f) => [f, f.layer] as const))
     for (const f of group) f.layer = remap.get(oldLayers.get(f)!)!
     renumber(faces)
+    recordDepths()
   }
 
   const applyUnfoldOp = (op: UnfoldOp, step: number): void => {
@@ -612,6 +645,7 @@ export function buildModel(paper: Vec2[], steps: StepDef[]): Built {
       if (before !== undefined) f.layer = before
     }
     renumber(faces)
+    recordDepths()
   }
 
   const applyGlobalOp = (op: SpinOp | TurnOp | PoseOp, step: number): void => {
@@ -663,6 +697,7 @@ export function buildModel(paper: Vec2[], steps: StepDef[]): Built {
       if (op.kind === 'turn') f.layer = -f.layer
     }
     renumber(faces)
+    recordDepths()
   }
 
   const snapshots: { layer: number; poly: Vec2[] }[][] = []
@@ -672,7 +707,6 @@ export function buildModel(paper: Vec2[], steps: StepDef[]): Built {
       else if (op.kind === 'unfold') applyUnfoldOp(op, si)
       else applyGlobalOp(op, si)
     }
-    for (const f of faces) f.signedLayer.push(f.layer * Math.sign(isoDet(f.flat)))
     snapshots.push(
       faces
         .map((f) => ({ layer: f.layer, poly: f.poly.map((p) => applyIso(f.flat, p)) }))
@@ -692,7 +726,7 @@ export function buildModel(paper: Vec2[], steps: StepDef[]): Built {
       poly: f.poly,
       tags: f.tags,
       chain: f.chain,
-      signedLayer: f.signedLayer,
+      signedDepth: f.signedDepth,
     })),
     folds,
     steps: steps.map((s) => ({ title: s.title, desc: s.desc })),
@@ -707,13 +741,18 @@ const easeInOut = (t: number): number => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow
 
 const clamp01 = (t: number): number => Math.min(1, Math.max(0, t))
 
+/** 某一摺在本步驟進度 t 時已完成的比例 */
+function progressOf(fold: BuiltFold, t: number): number {
+  const local = fold.t1 <= fold.t0 ? 1 : (t - fold.t0) / (fold.t1 - fold.t0)
+  return easeInOut(clamp01(local))
+}
+
 /** 各摺在 (step, t) 時刻的角度；t 是該步驟內 0→1 的進度 */
 export function anglesAt(built: Built, step: number, t: number): number[] {
   return built.folds.map((f) => {
     if (f.step < step) return f.angle * f.sign
     if (f.step > step) return 0
-    const local = f.t1 <= f.t0 ? 1 : (t - f.t0) / (f.t1 - f.t0)
-    return f.angle * f.sign * easeInOut(clamp01(local))
+    return f.angle * f.sign * progressOf(f, t)
   })
 }
 
@@ -740,11 +779,19 @@ export function matricesAt(built: Built, step: number, t: number): Matrix4[] {
   return mats
 }
 
-/** 紙張厚度造成的層間偏移量（帶號，沿面自身法線方向） */
-export function signedLayerAt(built: Built, faceIdx: number, step: number, t: number): number {
-  const hist = built.faces[faceIdx].signedLayer
-  const from = hist[Math.min(step, hist.length - 1)]
-  const to = hist[Math.min(step + 1, hist.length - 1)]
-  return from + (to - from) * easeInOut(clamp01(t))
+/**
+ * 紙張厚度造成的偏移量（帶號，沿面自身法線方向）。
+ *
+ * 每一摺造成的厚度變化，各自跟著那一摺的進度變化，而不是整個步驟一起內插。
+ * 複合摺的子摺有各自的時間區間，若用步驟進度統一內插，先落下的紙層偏移量還沒到位，
+ * 就會穿進下方的紙裡。
+ */
+export function sheetOffsetAt(built: Built, faceIdx: number, step: number, t: number): number {
+  const hist = built.faces[faceIdx].signedDepth
+  const ids = built.folds.filter((f) => f.step === step).map((f) => f.id)
+  if (ids.length === 0) return hist[Math.min(hist.length - 1, 0)]
+  let v = hist[ids[0]]
+  for (const id of ids) v += (hist[id + 1] - hist[id]) * progressOf(built.folds[id], t)
+  return v
 }
 

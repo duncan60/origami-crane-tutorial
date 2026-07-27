@@ -23,13 +23,18 @@ import {
   embed,
   matricesAt,
   rotationAboutLine,
-  signedLayerAt,
+  sheetOffsetAt,
   type Built,
   type BuiltFold,
 } from './fold'
 
-/** 紙張厚度，用來把重疊的層錯開，避免 z-fighting */
-const SHEET = 0.0055
+/**
+ * 紙張厚度，用來把重疊的層錯開避免 z-fighting。
+ *
+ * 紙鶴最厚處有 14 層，所以這個值會被放大 14 倍；取太大會讓厚的部位（頸、尾）
+ * 浮離身體而露出破面。只要大於深度緩衝的解析度就夠了。
+ */
+const SHEET = 0.0022
 
 const COLOR_FRONT = 0xd2603f
 const COLOR_BACK = 0xf2ebdf
@@ -125,7 +130,8 @@ export class Viewer {
     this.renderer = new WebGLRenderer({ canvas, antialias: true, alpha: true })
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
 
-    this.camera = new PerspectiveCamera(38, 1, 0.1, 100)
+    // 近裁剪面盡量拉遠（軌道最近距離是 1），深度緩衝的精度才夠分辨薄薄的紙層
+    this.camera = new PerspectiveCamera(38, 1, 0.5, 40)
     this.controls = new OrbitControls(this.camera, canvas)
     this.computeFrames()
     this.applyFrame(this.frames[0])
@@ -338,7 +344,7 @@ export class Viewer {
       const m = mats[fi]
       const off = new Vector3(0, 1, 0)
         .transformDirection(m)
-        .multiplyScalar(SHEET * signedLayerAt(built, fi, step, t))
+        .multiplyScalar(SHEET * sheetOffsetAt(built, fi, step, t))
       const verts = face.poly.map((p) => embed(p).applyMatrix4(m).add(off))
       worldVerts.push(verts)
       const slots = this.faceSlots[fi].slots
@@ -397,7 +403,7 @@ export class Viewer {
     // 代表面本身因為紙張厚度已經被推離基準面，標示要跟著推同樣的量才不會被紙面蓋住
     const sheet = n
       .clone()
-      .multiplyScalar(SHEET * signedLayerAt(this.built, fold.repIndex, this.step, this.t))
+      .multiplyScalar(SHEET * sheetOffsetAt(this.built, fold.repIndex, this.step, this.t))
     const a = embed(fold.creasePaper![0]).applyMatrix4(m).add(sheet)
     const b = embed(fold.creasePaper![1]).applyMatrix4(m).add(sheet)
     const dir = new Vector3().subVectors(b, a)
@@ -411,7 +417,7 @@ export class Viewer {
     const gap = mountain ? 0.032 : 0.042
     const side = new Vector3().crossVectors(n, dir).normalize().multiplyScalar(0.011)
     // 兩面都抬離紙面，從正反面看都不會被紙面吃掉
-    const lift = n.clone().multiplyScalar(0.013)
+    const lift = n.clone().multiplyScalar(0.006)
 
     for (let s = 0; s < len - 1e-6; s += dash + gap) {
       const e = Math.min(len, s + dash)
