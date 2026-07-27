@@ -187,6 +187,40 @@ function splitPoly(
   }
 }
 
+function ccwOrder(poly: Vec2[]): Vec2[] {
+  let s = 0
+  for (let i = 0; i < poly.length; i++) {
+    const p = poly[i]
+    const q = poly[(i + 1) % poly.length]
+    s += p.x * q.y - q.x * p.y
+  }
+  return s > 0 ? poly : [...poly].reverse()
+}
+
+/** 兩個凸多邊形的交集面積（半平面裁剪） */
+export function convexOverlapArea(A: Vec2[], B: Vec2[]): number {
+  let r = ccwOrder(A)
+  const b = ccwOrder(B)
+  for (let i = 0; i < b.length && r.length >= 3; i++) {
+    const p0 = b[i]
+    const p1 = b[(i + 1) % b.length]
+    const out: Vec2[] = []
+    for (let k = 0; k < r.length; k++) {
+      const c = r[k]
+      const d = r[(k + 1) % r.length]
+      const sc = (p1.x - p0.x) * (c.y - p0.y) - (p1.y - p0.y) * (c.x - p0.x)
+      const sd = (p1.x - p0.x) * (d.y - p0.y) - (p1.y - p0.y) * (d.x - p0.x)
+      if (sc >= -EPS) out.push(c)
+      if ((sc > EPS && sd < -EPS) || (sc < -EPS && sd > EPS)) {
+        const u = sc / (sc - sd)
+        out.push(v2(c.x + u * (d.x - c.x), c.y + u * (d.y - c.y)))
+      }
+    }
+    r = out
+  }
+  return r.length >= 3 ? area2(r) / 2 : 0
+}
+
 /** 直線 (P, D) 落在多邊形內的參數區間，量在 D 方向上 */
 function clipLineToPoly(poly: Vec2[], P: Vec2, D: Vec2): [number, number] | null {
   const hits: number[] = []
@@ -334,8 +368,8 @@ export interface Built {
   folds: BuiltFold[]
   steps: { title: string; desc: string }[]
   nSteps: number
-  /** 每個步驟結束時的攤平狀態，供編寫摺法時查座標與層序 */
-  snapshots: { layer: number; poly: Vec2[] }[][]
+  /** 每個步驟結束時的攤平狀態，供編寫摺法時查座標、層序與局部厚度 */
+  snapshots: { layer: number; depth: number; poly: Vec2[] }[][]
 }
 
 // ---------------------------------------------------------------- 建構
@@ -426,30 +460,45 @@ export function buildModel(paper: Vec2[], steps: StepDef[]): Built {
   }
 
   /**
-   * 記錄每個面此刻的局部厚度：以自己的重心為取樣點，數有幾個層號較低的面蓋著同一個位置。
-   * 每一摺結束後都記一次，這樣播放動畫時偏移量可以跟著造成它的那一摺一起變化，
-   * 而不是整個步驟一起線性內插——否則子摺提早落下時，紙層會互相穿刺。
+   * 記錄每個面此刻的局部厚度，也就是它在自己那一疊紙裡的高度。
+   *
+   * 依層號由低到高處理，每個面的高度 = 「所有和它重疊、且層號更低的面」之中最大的高度 + 1。
+   * 這是重疊關係上的最長鏈，保證**任何一對重疊的面高度都嚴格不同**——只要兩個重疊的面
+   * 拿到相同高度，偏移量就會一樣而互相 z-fighting，畫面上就是斑駁的鋸齒邊界。
+   *
+   * 不能改用「數有幾個面蓋住自己的重心」這種取樣法：兩個重疊的面各自用不同的取樣點，
+   * 數出來的結果可能相同。
+   *
+   * 每一摺結束後都記一次，播放動畫時偏移量才能跟著造成它的那一摺變化，
+   * 而不是整個步驟一起內插——否則子摺提早落下時，紙層會互相穿刺。
    */
   function recordDepths(): void {
     const flats = faces.map((f) => f.poly.map((p) => applyIso(f.flat, p)))
-    const cents = flats.map(centroid)
     const boxes = flats.map((poly) => ({
       x0: Math.min(...poly.map((p) => p.x)),
       x1: Math.max(...poly.map((p) => p.x)),
       y0: Math.min(...poly.map((p) => p.y)),
       y1: Math.max(...poly.map((p) => p.y)),
     }))
-    faces.forEach((f, i) => {
-      const c = cents[i]
-      let depth = 0
-      for (let j = 0; j < faces.length; j++) {
-        if (j === i || faces[j].layer >= f.layer) continue
+    const order = faces.map((_, i) => i).sort((a, b) => faces[a].layer - faces[b].layer)
+    const height = new Array<number>(faces.length).fill(0)
+
+    for (let oi = 0; oi < order.length; oi++) {
+      const i = order[oi]
+      let best = -1
+      for (let oj = 0; oj < oi; oj++) {
+        const j = order[oj]
+        if (faces[j].layer >= faces[i].layer) continue
+        // 只要不可能提高目前的最大值，就不必做昂貴的重疊判斷
+        if (height[j] <= best) continue
+        const a = boxes[i]
         const b = boxes[j]
-        if (c.x < b.x0 || c.x > b.x1 || c.y < b.y0 || c.y > b.y1) continue
-        if (pointInPoly(flats[j], c)) depth++
+        if (a.x1 < b.x0 || b.x1 < a.x0 || a.y1 < b.y0 || b.y1 < a.y0) continue
+        if (convexOverlapArea(flats[i], flats[j]) > 1e-7) best = height[j]
       }
-      f.signedDepth.push(depth * Math.sign(isoDet(f.flat)))
-    })
+      height[i] = best + 1
+    }
+    faces.forEach((f, i) => f.signedDepth.push(height[i] * Math.sign(isoDet(f.flat))))
   }
 
   /** 某一摺在目前狀態下的 3D 旋轉矩陣（先前各摺皆已完成） */
@@ -700,7 +749,7 @@ export function buildModel(paper: Vec2[], steps: StepDef[]): Built {
     recordDepths()
   }
 
-  const snapshots: { layer: number; poly: Vec2[] }[][] = []
+  const snapshots: { layer: number; depth: number; poly: Vec2[] }[][] = []
   steps.forEach((step, si) => {
     for (const op of step.ops) {
       if (op.kind === 'fold') applyFoldOp(op, si)
@@ -709,7 +758,11 @@ export function buildModel(paper: Vec2[], steps: StepDef[]): Built {
     }
     snapshots.push(
       faces
-        .map((f) => ({ layer: f.layer, poly: f.poly.map((p) => applyIso(f.flat, p)) }))
+        .map((f) => ({
+          layer: f.layer,
+          depth: Math.abs(f.signedDepth[f.signedDepth.length - 1]),
+          poly: f.poly.map((p) => applyIso(f.flat, p)),
+        }))
         .sort((a, b) => a.layer - b.layer),
     )
   })

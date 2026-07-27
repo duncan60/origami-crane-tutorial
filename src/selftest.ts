@@ -1,4 +1,4 @@
-import { embed, matricesAt, type Built, type Vec2 } from './fold'
+import { convexOverlapArea, embed, matricesAt, type Built, type Vec2 } from './fold'
 
 /**
  * 摺紙模型的不變量檢查。在主控台呼叫 `__selftest()` 執行。
@@ -15,41 +15,6 @@ const area = (poly: Vec2[]): number => {
     s += p.x * q.y - q.x * p.y
   }
   return Math.abs(s) / 2
-}
-
-const ccw = (poly: Vec2[]): Vec2[] => {
-  let s = 0
-  for (let i = 0; i < poly.length; i++) {
-    const p = poly[i]
-    const q = poly[(i + 1) % poly.length]
-    s += p.x * q.y - q.x * p.y
-  }
-  return s > 0 ? poly : [...poly].reverse()
-}
-
-/** 用半平面裁剪求兩個凸多邊形的交集面積 */
-const overlapArea = (A: Vec2[], B: Vec2[]): number => {
-  let r = ccw(A)
-  const b = ccw(B)
-  for (let i = 0; i < b.length && r.length >= 3; i++) {
-    const p0 = b[i]
-    const p1 = b[(i + 1) % b.length]
-    const side = (p: Vec2): number => (p1.x - p0.x) * (p.y - p0.y) - (p1.y - p0.y) * (p.x - p0.x)
-    const out: Vec2[] = []
-    for (let k = 0; k < r.length; k++) {
-      const c = r[k]
-      const d = r[(k + 1) % r.length]
-      const sc = side(c)
-      const sd = side(d)
-      if (sc >= -1e-9) out.push(c)
-      if ((sc > 1e-9 && sd < -1e-9) || (sc < -1e-9 && sd > 1e-9)) {
-        const u = sc / (sc - sd)
-        out.push({ x: c.x + u * (d.x - c.x), y: c.y + u * (d.y - c.y) })
-      }
-    }
-    r = out
-  }
-  return r.length >= 3 ? area(r) : 0
 }
 
 export function selftest(built: Built, paperArea: number): string {
@@ -80,26 +45,28 @@ export function selftest(built: Built, paperArea: number): string {
   }
   check(flatness.every((v) => v < 1e-4), `前 ${built.nSteps - 1} 步摺平（最大偏離 ${Math.max(...flatness).toExponential(1)}）`)
 
-  // 3. 同一層號的兩個面不能在投影上重疊——它們會拿到相同的厚度偏移而互相 z-fighting
-  let overlaps = 0
-  for (const snap of built.snapshots) {
-    const byLayer = new Map<number, Vec2[][]>()
-    for (const f of snap) {
-      const g = byLayer.get(f.layer) ?? []
-      g.push(f.poly)
-      byLayer.set(f.layer, g)
-    }
-    for (const g of byLayer.values()) {
-      for (let i = 0; i < g.length; i++) {
-        for (let j = i + 1; j < g.length; j++) if (overlapArea(g[i], g[j]) > 1e-4) overlaps++
+  // 3. 任何一對在投影上重疊的面，局部厚度都必須不同。
+  //    厚度相同就代表偏移量相同，兩個面會在同一個深度互相 z-fighting，
+  //    畫面上呈現斑駁的鋸齒邊界——這正是步驟 7 以後破圖的成因。
+  const collisions: string[] = []
+  built.snapshots.forEach((snap, si) => {
+    let n = 0
+    for (let i = 0; i < snap.length; i++) {
+      for (let j = i + 1; j < snap.length; j++) {
+        if (snap[i].depth !== snap[j].depth) continue
+        if (convexOverlapArea(snap[i].poly, snap[j].poly) > 1e-5) n++
       }
     }
-  }
-  check(overlaps === 0, `同層無重疊（發現 ${overlaps} 對）`)
+    if (n > 0) collisions.push(`步驟 ${si + 1} 有 ${n} 對`)
+  })
+  check(
+    collisions.length === 0,
+    `重疊的面厚度皆不同（${collisions.length === 0 ? '無衝突' : collisions.join('、')}）`,
+  )
 
   // 4. 局部厚度就是該處實際壓著的紙層數，數值應該接近真實紙鶴的層數而非全域層號
   const maxDepth = Math.max(...built.faces.flatMap((f) => f.signedDepth.map(Math.abs)))
-  check(maxDepth <= 20, `最厚處 ${maxDepth} 層（過大會讓厚的部位浮離而穿面）`)
+  check(maxDepth <= 26, `最厚處 ${maxDepth} 層（過大會讓厚的部位浮離而穿面）`)
 
   return `${failed === 0 ? '全部通過' : `${failed} 項未通過`}\n${lines.join('\n')}`
 }
