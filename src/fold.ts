@@ -748,9 +748,3 @@ export function signedLayerAt(built: Built, faceIdx: number, step: number, t: nu
   return from + (to - from) * easeInOut(clamp01(t))
 }
 
-/** 某一摺當下的 3D 摺痕線段，用於圖解標示 */
-export function creaseSegmentAt(fold: BuiltFold, mats: Matrix4[]): [Vector3, Vector3] | null {
-  if (fold.kind !== 'fold' || !fold.creasePaper) return null
-  const m = mats[fold.repIndex]
-  return [embed(fold.creasePaper[0]).applyMatrix4(m), embed(fold.creasePaper[1]).applyMatrix4(m)]
-}
