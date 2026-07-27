@@ -1,6 +1,6 @@
 import './style.css'
-import { buildModel, embed, matricesAt, v2, type Built } from './fold'
-import { craneSteps } from './crane'
+import { buildModel, embed, matricesAt, type Built } from './fold'
+import { planePaper, planeSteps } from './plane'
 import { selftest } from './selftest'
 import { Viewer } from './viewer'
 
@@ -8,9 +8,7 @@ import { Viewer } from './viewer'
 // 所以任何改動都直接整頁重載。
 if (import.meta.hot) import.meta.hot.accept(() => window.location.reload())
 
-const PAPER = [v2(-1, -1), v2(1, -1), v2(1, 1), v2(-1, 1)]
-
-const built: Built = buildModel(PAPER, craneSteps)
+const built: Built = buildModel(planePaper, planeSteps)
 
 const el = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T
 const canvas = el<HTMLCanvasElement>('canvas')
@@ -147,7 +145,17 @@ goTo(0)
 ;(window as unknown as Record<string, unknown>).__viewer = viewer
 
 // 一次跑完所有幾何不變量檢查
-;(window as unknown as Record<string, unknown>).__selftest = (): string => selftest(built, 4)
+;(window as unknown as Record<string, unknown>).__selftest = (): string => {
+  // 從紙張輪廓獨立算出面積，才能真正驗證「摺紙不會讓紙消失」
+  const paperArea =
+    Math.abs(
+      planePaper.reduce((s, p, i) => {
+        const q = planePaper[(i + 1) % planePaper.length]
+        return s + p.x * q.y - q.x * p.y
+      }, 0),
+    ) / 2
+  return selftest(built, paperArea)
+}
 
 // 檢查某個時刻的 3D 幾何是否確實攤平（摺平狀態下 y 應該全為 0）
 ;(window as unknown as Record<string, unknown>).__probe = (s: number, tt: number): string => {
