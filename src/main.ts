@@ -122,6 +122,8 @@ scrub.addEventListener('input', () => {
 })
 
 window.addEventListener('keydown', (e) => {
+  // 焦點在進度條上時，方向鍵留給滑桿本身，否則會同時跳步驟
+  if (e.target === scrub) return
   if (e.key === 'ArrowRight') goTo(step + 1)
   else if (e.key === 'ArrowLeft') goTo(step - 1)
   else if (e.key === ' ') {
