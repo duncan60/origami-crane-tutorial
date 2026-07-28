@@ -252,6 +252,12 @@ export type LayerSel =
    * 例如翅膀尖端只有兩層紙蓋著，就能明確指出前翅或後翅。
    */
   | { at: Vec2; pick: 'top' | 'bottom'; count?: number }
+  /**
+   * 選「某個先前的摺移動過的那疊紙」。蛇腹摺（pleat)的第二摺必須把
+   * 第一摺剛翻過去的整疊再摺回來，那疊的層數會隨位置變化，
+   * 用層號或取樣點都選不乾淨——用摺的 ref 直接指名最穩。
+   */
+  | { movedBy: string }
 
 export interface FoldOp {
   kind: 'fold'
@@ -410,7 +416,7 @@ function matchesPrefix(face: SimFace | BuiltFace, prefix: number[], foldId: numb
 
 function pickLayers(layers: number[], sel: LayerSel | undefined): Set<number> {
   const distinct = [...new Set(layers)].sort((p, q) => p - q)
-  if (!sel || sel === 'all' || 'at' in sel) return new Set(distinct)
+  if (!sel || sel === 'all' || 'at' in sel || 'movedBy' in sel) return new Set(distinct)
   if ('top' in sel) return new Set(distinct.slice(Math.max(0, distinct.length - sel.top)))
   if ('bottom' in sel) return new Set(distinct.slice(0, sel.bottom))
   return new Set(distinct.slice(sel.range[0], sel.range[1] + 1))
@@ -532,27 +538,37 @@ export function buildModel(paper: Vec2[], steps: StepDef[]): Built {
     faces = pieces.map((p) => p.face)
     layerSnapshots.set(foldId, new Map(faces.map((f) => [f, f.layer] as const)))
 
-    // 2. 在移動側依層序挑出真正要摺的面
+    // 2. 在移動側挑出真正要摺的面
     const movingSide = pieces.filter((p) => p.moving)
-    let chosen: Set<number>
-    if (op.layers && typeof op.layers === 'object' && 'at' in op.layers) {
-      const sel = op.layers
-      const covering = movingSide.filter((p) =>
-        pointInPoly(
-          p.face.poly.map((q) => applyIso(p.face.flat, q)),
-          sel.at,
-        ),
-      )
-      const distinct = [...new Set(covering.map((p) => p.face.layer))].sort((x, y) => x - y)
-      const n = sel.count ?? 1
-      chosen = new Set(sel.pick === 'top' ? distinct.slice(-n) : distinct.slice(0, n))
+    let group: SimFace[]
+    if (op.layers && typeof op.layers === 'object' && 'movedBy' in op.layers) {
+      // 直接指名「被某個先前的摺移動過」的面，不經過層號
+      const refId = refs.get(op.layers.movedBy)
+      if (refId === undefined) {
+        throw new Error(`步驟 ${step + 1}：找不到 movedBy ref「${op.layers.movedBy}」`)
+      }
+      group = movingSide.filter((p) => p.face.chain.includes(refId)).map((p) => p.face)
     } else {
-      chosen = pickLayers(
-        movingSide.map((p) => p.face.layer),
-        op.layers,
-      )
+      let chosen: Set<number>
+      if (op.layers && typeof op.layers === 'object' && 'at' in op.layers) {
+        const sel = op.layers
+        const covering = movingSide.filter((p) =>
+          pointInPoly(
+            p.face.poly.map((q) => applyIso(p.face.flat, q)),
+            sel.at,
+          ),
+        )
+        const distinct = [...new Set(covering.map((p) => p.face.layer))].sort((x, y) => x - y)
+        const n = sel.count ?? 1
+        chosen = new Set(sel.pick === 'top' ? distinct.slice(-n) : distinct.slice(0, n))
+      } else {
+        chosen = pickLayers(
+          movingSide.map((p) => p.face.layer),
+          op.layers,
+        )
+      }
+      group = movingSide.filter((p) => chosen.has(p.face.layer)).map((p) => p.face)
     }
-    const group = movingSide.filter((p) => chosen.has(p.face.layer)).map((p) => p.face)
     if (group.length === 0) throw new Error(`步驟 ${step + 1}：這一摺沒有選到任何面`)
 
     // 3. 摺痕顯示線段：所有移動面在攤平座標中沿摺線的聯集範圍
