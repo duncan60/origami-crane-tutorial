@@ -1,5 +1,6 @@
 import './style.css'
 import { buildModel, embed, matricesAt, type Built } from './fold'
+import { renderDiagram } from './diagram'
 import { models, paperColors, type ModelDef } from './models'
 import { selftest } from './selftest'
 import { Viewer } from './viewer'
@@ -19,6 +20,9 @@ const stepList = el('step-list')
 const modelTabs = el('model-tabs')
 const modelName = el('model-name')
 const palette = el('palette')
+const diagramBox = el('diagram')
+const viewSwitch = el('view-switch')
+const hint = el('hint')
 const btnPrev = el<HTMLButtonElement>('btn-prev')
 const btnNext = el<HTMLButtonElement>('btn-next')
 const btnPlay = el<HTMLButtonElement>('btn-play')
@@ -32,6 +36,7 @@ let step = 0
 let t = 1
 let playing = false
 let lastFrame = 0
+let view: '3d' | 'diagram' = '3d'
 
 const COLOR_KEY = 'origami-paper-color'
 
@@ -43,9 +48,37 @@ function savedColor(): number {
 // ---------------------------------------------------------------- 狀態同步
 
 function render(): void {
-  viewer?.setState(step, t)
+  if (view === '3d') {
+    viewer?.setState(step, t)
+  } else {
+    // 圖解畫的是「這一步開始前」的靜態狀態，不隨進度條變化
+    const box = diagramBox.getBoundingClientRect()
+    diagramBox.innerHTML = renderDiagram(
+      built,
+      model.paper,
+      step,
+      savedColor(),
+      Math.max(320, box.width),
+      Math.max(320, box.height),
+    )
+  }
   scrub.value = String(Math.round(t * 1000))
   scrubLabel.textContent = `${Math.round(t * 100)}%`
+}
+
+/** 2D 圖解是靜態的，播放與拖曳進度只在 3D 模式下有意義 */
+function applyView(next: '3d' | 'diagram'): void {
+  view = next
+  if (view === 'diagram') playing = false
+  diagramBox.hidden = view !== 'diagram'
+  canvas.style.visibility = view === '3d' ? 'visible' : 'hidden'
+  hint.textContent =
+    view === '3d' ? '拖曳畫面可旋轉視角 · 滾輪縮放' : '2D 圖解：每一步顯示「摺之前」的樣子與該摺的位置'
+  for (const b of [btnPlay, btnReplay, scrub]) b.disabled = view === 'diagram'
+  viewSwitch.querySelectorAll('button').forEach((b) => {
+    b.classList.toggle('active', (b as HTMLElement).dataset.view === view)
+  })
+  render()
 }
 
 function syncChrome(): void {
@@ -59,6 +92,7 @@ function syncChrome(): void {
   btnPrev.disabled = step === 0
   btnNext.disabled = step === built.nSteps - 1
   btnPlay.textContent = playing ? '❚❚ 暫停' : '▶ 播放'
+  if (view === 'diagram') for (const b of [btnPlay, btnReplay, scrub]) b.disabled = true
 }
 
 function goTo(next: number, autoplay = true): void {
@@ -106,7 +140,13 @@ function loadModel(m: ModelDef): void {
   })
 
   exposeDebug()
-  goTo(0)
+  step = 0
+  t = 1
+  playing = false
+  syncChrome()
+  // 每個作品有自己適合的預設呈現模式（層數多的預設 2D 圖解）
+  applyView(m.view ?? '3d')
+  if (view === '3d') goTo(0)
 }
 
 // ---------------------------------------------------------------- 作品切換器
@@ -128,6 +168,14 @@ window.addEventListener('hashchange', () => {
   if (m && m.id !== model.id) loadModel(m)
 })
 
+viewSwitch.querySelectorAll('button').forEach((b) => {
+  b.addEventListener('click', () => applyView((b as HTMLElement).dataset.view as '3d' | 'diagram'))
+})
+
+window.addEventListener('resize', () => {
+  if (view === 'diagram') render()
+})
+
 // ---------------------------------------------------------------- 色盤
 
 paperColors.forEach((c) => {
@@ -139,6 +187,7 @@ paperColors.forEach((c) => {
   btn.addEventListener('click', () => {
     localStorage.setItem(COLOR_KEY, String(c.hex))
     viewer?.setPaperColor(c.hex)
+    if (view === 'diagram') render()
     palette.querySelectorAll('.swatch-btn').forEach((b) => b.classList.toggle('active', b === btn))
   })
   palette.append(btn)

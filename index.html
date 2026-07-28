@@ -10,6 +10,11 @@
     <div id="app">
       <main id="stage">
         <canvas id="canvas"></canvas>
+        <div id="diagram" hidden></div>
+        <div id="view-switch" role="group" aria-label="呈現模式">
+          <button id="view-3d" data-view="3d">3D 立體</button>
+          <button id="view-diagram" data-view="diagram">2D 圖解</button>
+        </div>
         <div id="hint">拖曳畫面可旋轉視角 · 滾輪縮放</div>
       </main>
       <aside id="panel">

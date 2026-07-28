@@ -359,8 +359,12 @@ export interface BuiltFold {
   /** 代表面的 chain 前綴，用來在最終面陣列中定位代表面 */
   prefix: number[]
   repIndex: number
-  /** 供圖解使用的摺痕線段（代表面的紙張座標） */
+  /** 供 3D 圖解使用的摺痕線段（代表面的紙張座標） */
   creasePaper?: [Vec2, Vec2]
+  /** 同一條摺痕在攤平座標中的線段，供 2D 圖解直接使用 */
+  creaseFlat?: [Vec2, Vec2]
+  /** 移動面群重心在攤平座標中「摺前 → 摺後」的位置，供 2D 圖解畫方向箭頭 */
+  arrowFlat?: [Vec2, Vec2]
   creaseType?: 'valley' | 'mountain'
   showCrease: boolean
   /** kind === 'spin' | 'turn'：固定的世界座標旋轉軸 */
@@ -374,8 +378,11 @@ export interface Built {
   folds: BuiltFold[]
   steps: { title: string; desc: string }[]
   nSteps: number
-  /** 每個步驟結束時的攤平狀態，供編寫摺法時查座標、層序與局部厚度 */
-  snapshots: { layer: number; depth: number; poly: Vec2[] }[][]
+  /**
+   * 每個步驟結束時的攤平狀態，供編寫摺法時查座標，也是 2D 圖解的資料來源。
+   * flip 為 -1 代表這一片翻過面、露出的是紙的另一色。
+   */
+  snapshots: { layer: number; depth: number; flip: number; poly: Vec2[]; tags: number[] }[][]
 }
 
 // ---------------------------------------------------------------- 建構
@@ -615,10 +622,18 @@ export function buildModel(paper: Vec2[], steps: StepDef[]): Built {
         applyIso(repInv, v2(P.x + D.x * lo, P.y + D.y * lo)),
         applyIso(repInv, v2(P.x + D.x * hi, P.y + D.y * hi)),
       ],
+      creaseFlat: [v2(P.x + D.x * lo, P.y + D.y * lo), v2(P.x + D.x * hi, P.y + D.y * hi)],
       creaseType: op.crease ?? 'valley',
       showCrease: !op.hideCrease,
       affected: [],
     }
+
+    // 2D 圖解的方向箭頭：移動面群重心在攤平座標中摺前的位置，與它鏡射後的位置
+    {
+      const before = centroid(group.map((f) => applyIso(f.flat, centroid(f.poly))))
+      fold.arrowFlat = [before, applyIso(reflectionIso(P, D), before)]
+    }
+
     folds.push(fold)
     if (op.ref) refs.set(op.ref, foldId)
 
@@ -743,7 +758,8 @@ export function buildModel(paper: Vec2[], steps: StepDef[]): Built {
     recordLayers()
   }
 
-  const snapshots: { layer: number; depth: number; poly: Vec2[] }[][] = []
+  const snapshots: { layer: number; depth: number; flip: number; poly: Vec2[]; tags: number[] }[][] =
+    []
   steps.forEach((step, si) => {
     for (const op of step.ops) {
       if (op.kind === 'fold') applyFoldOp(op, si)
@@ -755,7 +771,9 @@ export function buildModel(paper: Vec2[], steps: StepDef[]): Built {
         .map((f) => ({
           layer: f.layer,
           depth: Math.abs(f.signedLayer[f.signedLayer.length - 1]),
+          flip: Math.sign(isoDet(f.flat)),
           poly: f.poly.map((p) => applyIso(f.flat, p)),
+          tags: [...f.tags],
         }))
         .sort((a, b) => a.layer - b.layer),
     )
