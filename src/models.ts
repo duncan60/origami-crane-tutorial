@@ -2,7 +2,6 @@ import { v2, type StepDef, type Vec2 } from './fold'
 import { dogSteps } from './dog'
 import { planePaper, planeSteps } from './plane'
 import { kabutoSteps } from './kabuto'
-import { snowmanSteps } from './snowman'
 
 export interface ModelDef {
   id: string
@@ -24,7 +23,6 @@ export const models: ModelDef[] = [
   { id: 'dog', name: '狗臉', difficulty: '入門', paper: diamond, steps: dogSteps },
   { id: 'plane', name: '紙飛機', difficulty: '初級', paper: planePaper, steps: planeSteps },
   { id: 'kabuto', name: '武士帽', difficulty: '中級', paper: diamond, steps: kabutoSteps },
-  { id: 'snowman', name: '雪人', difficulty: '高級', paper: diamond, steps: snowmanSteps },
 ]
 
 /** 色盤：紙張有顏色那一面的選項（紙背固定為米白） */
