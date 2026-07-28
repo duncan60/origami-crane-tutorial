@@ -39,6 +39,8 @@ body {
   grid-area: stage;
   position: relative;
   min-width: 0;
+  /* canvas 的固有尺寸會把 1fr 的格子撐爆（尤其窄版直向排列時），必須歸零 */
+  min-height: 0;
   background:
     radial-gradient(ellipse at 50% 35%, #262b36 0%, #14161c 70%);
 }
@@ -295,9 +297,13 @@ body {
   :root { --panel-w: 0px; }
   #app {
     grid-template-columns: 1fr;
-    grid-template-rows: 1fr auto var(--controls-h);
+    grid-template-rows: minmax(0, 1fr) auto var(--controls-h);
     grid-template-areas: "stage" "panel" "controls";
   }
-  #panel { border-left: 0; border-top: 1px solid var(--line); max-height: 40vh; }
+  #panel { border-left: 0; border-top: 1px solid var(--line); max-height: 42vh; overflow-y: auto; }
   #step-list, #legend { display: none; }
+  #model-tabs { margin-top: 10px; }
+  #panel-head { padding: 12px 16px 10px; }
+  #panel-head h1 { font-size: 20px; }
+  #step-detail { padding: 12px 16px; }
 }
