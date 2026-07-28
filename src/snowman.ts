@@ -192,8 +192,8 @@ export const snowmanSteps: StepDef[] = [
     ops: [
       {
         kind: 'fold',
-        a: v2(-2, 0.14),
-        b: v2(2, 0.14),
+        a: v2(-2, -0.1),
+        b: v2(2, -0.1),
         move: v2(0, -0.6),
         dir: 'up',
         crease: 'valley',
@@ -203,8 +203,8 @@ export const snowmanSteps: StepDef[] = [
       },
       {
         kind: 'fold',
-        a: v2(-2, 0.3),
-        b: v2(2, 0.3),
+        a: v2(-2, 0.06),
+        b: v2(2, 0.06),
         move: v2(0, 0.8),
         layers: { movedBy: 'body1' },
         dir: 'up',
@@ -220,8 +220,8 @@ export const snowmanSteps: StepDef[] = [
     ops: [
       {
         kind: 'fold',
-        a: v2(-0.4, 0.45),
-        b: v2(-0.62, -1.1),
+        a: v2(-0.33, 0.9),
+        b: v2(-0.52, -1.2),
         move: v2(-1.0, -0.2),
         dir: 'up',
         crease: 'valley',
@@ -230,8 +230,8 @@ export const snowmanSteps: StepDef[] = [
       },
       {
         kind: 'fold',
-        a: v2(0.4, 0.45),
-        b: v2(0.62, -1.1),
+        a: v2(0.33, 0.9),
+        b: v2(0.52, -1.2),
         move: v2(1.0, -0.2),
         dir: 'up',
         crease: 'valley',
@@ -246,9 +246,9 @@ export const snowmanSteps: StepDef[] = [
     ops: [
       {
         kind: 'fold',
-        a: v2(-1, -0.7),
-        b: v2(1, -0.7),
-        move: v2(0, -0.9),
+        a: v2(-1, -0.55),
+        b: v2(1, -0.55),
+        move: v2(0, -0.8),
         dir: 'up',
         crease: 'valley',
       },
