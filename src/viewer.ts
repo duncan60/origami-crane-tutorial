@@ -11,7 +11,9 @@ import {
   Mesh,
   MeshBasicMaterial,
   MeshStandardMaterial,
+  PCFSoftShadowMap,
   PerspectiveCamera,
+  PlaneGeometry,
   Scene,
   Vector3,
   WebGLRenderer,
@@ -34,9 +36,18 @@ import {
  */
 const SHEET = 0.0045
 
+/**
+ * 顯示用的鬆弛角比例：每一摺畫成「沒摺到底」（180° → 約 177.8°）。
+ * 真實的紙壓不到數學上的全平，紙層會微微扇開——這是立體感的主要來源。
+ * 注意鬆弛會沿摺疊鏈累積（一個面經過 8 摺就偏約 18°），值要取小。
+ * 只影響顯示；幾何驗證仍用全平狀態。
+ */
+const RELAX = 0.006
+
 const COLOR_FRONT = 0xd2603f
 const COLOR_BACK = 0xf2ebdf
-const COLOR_EDGE = 0x3d2117
+/** 紙張邊界固定近黑，交疊的紙層才分得開（同真實圖解的外框線） */
+const COLOR_EDGE = 0x211f1c
 const COLOR_CREASE = 0xa8866c
 const COLOR_VALLEY = 0x3f9dff
 const COLOR_MOUNTAIN = 0xff5f82
@@ -50,6 +61,8 @@ interface Frame {
   target: Vector3
   distance: number
   dir: Vector3
+  /** 地面（接觸陰影平面）的高度：該步驟動畫全程的最低點再往下一點 */
+  ground: number
 }
 
 /**
@@ -125,6 +138,15 @@ export class Viewer {
   private t = 1
   private frames: Frame[] = []
   private tween: { from: Frame; to: Frame; start: number } | null = null
+  /**
+   * 桌面：比背景略亮的平面，紙的影子落在上面才看得見
+   * （純 ShadowMaterial 的暗影疊在深色背景上等於隱形）。
+   * 欄位初始化，因為 applyFrame 在建構子一開始就會用到它。
+   */
+  private ground = new Mesh(
+    new PlaneGeometry(60, 60).rotateX(-Math.PI / 2),
+    new MeshStandardMaterial({ color: 0x232836, roughness: 1, metalness: 0 }),
+  )
 
   constructor(
     private canvas: HTMLCanvasElement,
@@ -132,6 +154,8 @@ export class Viewer {
   ) {
     this.renderer = new WebGLRenderer({ canvas, antialias: true, alpha: true })
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
+    this.renderer.shadowMap.enabled = true
+    this.renderer.shadowMap.type = PCFSoftShadowMap
 
     // 近裁剪面盡量拉遠（軌道最近距離是 1），深度緩衝的精度才夠分辨薄薄的紙層
     this.camera = new PerspectiveCamera(38, 1, 0.5, 40)
@@ -152,7 +176,20 @@ export class Viewer {
     this.scene.add(new HemisphereLight(0xfff6e8, 0x5c6272, 1.05))
     const key = new DirectionalLight(0xffffff, 1.25)
     key.position.set(2.4, 4.2, 2.8)
+    key.castShadow = true
+    key.shadow.mapSize.set(2048, 2048)
+    key.shadow.camera.left = -3
+    key.shadow.camera.right = 3
+    key.shadow.camera.top = 3
+    key.shadow.camera.bottom = -3
+    key.shadow.camera.near = 0.1
+    key.shadow.camera.far = 15
+    key.shadow.bias = -0.0004
     this.scene.add(key)
+
+    // 接觸陰影平面：只接收陰影、本身透明，模型才會「放在桌上」而不是浮在虛空
+    this.ground.receiveShadow = true
+    this.scene.add(this.ground)
     const fill = new DirectionalLight(0xc9d8ff, 0.7)
     fill.position.set(-2.8, 2.2, -2.4)
     this.scene.add(fill)
@@ -174,7 +211,12 @@ export class Viewer {
       side: 1,
       flatShading: true,
     })
-    this.scene.add(new Mesh(this.geometry, this.whiteMat), new Mesh(this.geometry, this.colorMat))
+    const meshWhite = new Mesh(this.geometry, this.whiteMat)
+    const meshColor = new Mesh(this.geometry, this.colorMat)
+    // 紙投影到地面；紙自己不接收陰影（近距平行紙層會產生條紋狀陰影瑕疵）
+    meshWhite.castShadow = true
+    meshColor.castShadow = true
+    this.scene.add(meshWhite, meshColor)
 
     // ---- 紙張邊緣與已摺出的摺痕 ----
     this.edgeMat = new LineBasicMaterial({ color: COLOR_EDGE })
@@ -219,13 +261,19 @@ export class Viewer {
    */
   private computeFrames(): void {
     for (let s = 0; s < this.built.nSteps; s++) {
-      // 只取步驟的起點與終點這兩個靜止狀態。動畫中途紙片會短暫豎起來，
-      // 若把那一瞬間也算進去，攤平的步驟會被誤判成立體的，仰角就會不必要地壓低。
+      // 框景與地面都只看步驟的起點與終點這兩個靜止狀態。動畫中途紙片會短暫
+      // 掃得更低或更高：地面若跟著最低點走，成品會懸空、影子脫離模型——
+      // 寧可讓往下摺的紙片在動畫中途短暫穿過桌面。
       const box = new Box3()
+      let groundY = Infinity
       for (const t of [0, 1]) {
-        const mats = matricesAt(this.built, s, t)
+        const mats = matricesAt(this.built, s, t, RELAX)
         this.built.faces.forEach((f, i) => {
-          for (const p of f.poly) box.expandByPoint(embed(p).applyMatrix4(mats[i]))
+          for (const p of f.poly) {
+            const q = embed(p).applyMatrix4(mats[i])
+            groundY = Math.min(groundY, q.y)
+            box.expandByPoint(q)
+          }
         })
       }
       const size = box.getSize(new Vector3())
@@ -241,6 +289,7 @@ export class Viewer {
           Math.sin(el),
           Math.cos(az) * Math.cos(el),
         ).normalize(),
+        ground: groundY - 0.02,
       })
     }
   }
@@ -248,6 +297,7 @@ export class Viewer {
   private applyFrame(f: Frame): void {
     this.controls.target.copy(f.target)
     this.camera.position.copy(f.target).add(f.dir.clone().multiplyScalar(f.distance))
+    this.ground.position.y = f.ground
   }
 
   private currentFrame(): Frame {
@@ -256,6 +306,7 @@ export class Viewer {
       target: this.controls.target.clone(),
       distance: offset.length(),
       dir: offset.normalize(),
+      ground: this.ground.position.y,
     }
   }
 
@@ -269,6 +320,7 @@ export class Viewer {
       target: from.target.clone().lerp(to.target, e),
       distance: from.distance + (to.distance - from.distance) * e,
       dir: from.dir.clone().lerp(to.dir, e).normalize(),
+      ground: from.ground + (to.ground - from.ground) * e,
     })
     if (k >= 1) this.tween = null
   }
@@ -331,7 +383,9 @@ export class Viewer {
 
   private update(): void {
     const { built, step, t } = this
-    const mats = matricesAt(built, step, t)
+    // 顯示用矩陣帶鬆弛角；箭頭與摺線的「是否完成」判斷用未鬆弛的角度，
+    // 否則鬆弛讓摺永遠差幾度「沒摺完」，箭頭會殘留在完成的步驟上。
+    const mats = matricesAt(built, step, t, RELAX)
     const angles = anglesAt(built, step, t)
 
     // 各面的頂點位置（含層間厚度偏移）
@@ -478,10 +532,10 @@ export class Viewer {
 
   // -------------------------------------------------------------- 生命週期
 
-  /** 換紙色：只換有顏色那一面，紙背維持米白；邊線與摺痕跟著紙色調深/調淡 */
+  /** 換紙色：只換有顏色那一面，紙背維持米白；摺痕跟著紙色調淡，邊界維持近黑 */
   setPaperColor(hex: number): void {
     this.colorMat.color.set(hex)
-    this.edgeMat.color.set(hex).multiplyScalar(0.32)
+    this.edgeMat.color.set(COLOR_EDGE)
     this.creaseMat.color.set(hex).lerp(new Color(0xf5efe4), 0.45)
   }
 

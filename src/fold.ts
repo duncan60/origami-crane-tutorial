@@ -794,18 +794,25 @@ function progressOf(fold: BuiltFold, t: number): number {
   return easeInOut(clamp01(local))
 }
 
-/** 各摺在 (step, t) 時刻的角度；t 是該步驟內 0→1 的進度 */
-export function anglesAt(built: Built, step: number, t: number): number[] {
+/**
+ * 各摺在 (step, t) 時刻的角度；t 是該步驟內 0→1 的進度。
+ *
+ * relax（0～1 的小數）讓每一摺顯示時略微「沒摺到底」——真實的紙永遠壓不到
+ * 數學上的 180°，紙層會微微扇開。只作用在真正的摺（fold），翻面、轉向、
+ * 姿態必須完整轉到位。幾何驗證（selftest）不傳 relax，不變量不受影響。
+ */
+export function anglesAt(built: Built, step: number, t: number, relax = 0): number[] {
   return built.folds.map((f) => {
-    if (f.step < step) return f.angle * f.sign
+    const soften = f.kind === 'fold' ? 1 - relax : 1
+    if (f.step < step) return f.angle * f.sign * soften
     if (f.step > step) return 0
-    return f.angle * f.sign * progressOf(f, t)
+    return f.angle * f.sign * soften * progressOf(f, t)
   })
 }
 
 /** 各面在 (step, t) 時刻的 3D 變換矩陣 */
-export function matricesAt(built: Built, step: number, t: number): Matrix4[] {
-  const angles = anglesAt(built, step, t)
+export function matricesAt(built: Built, step: number, t: number, relax = 0): Matrix4[] {
+  const angles = anglesAt(built, step, t, relax)
   const mats = built.faces.map(() => new Matrix4())
   for (const f of built.folds) {
     const deg = angles[f.id]
